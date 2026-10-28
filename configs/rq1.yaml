@@ -1,0 +1,24 @@
+# RQ1 sweep: tasks x models x batch sizes, 3 permutations per batch size.
+# Run on the A100:  python scripts/run.py --config configs/rq1.yaml
+name: rq1_v1
+backend: vllm
+backend_kwargs:
+  max_model_len: 24576         # b=32 WikiTQ prompts can exceed 16k tokens
+  gpu_memory_utilization: 0.90
+models:
+  - id: Qwen/Qwen3-8B
+    chat_template_kwargs: {enable_thinking: false}   # thinking off: controlled, non-CoT decoding
+  - id: google/gemma-3-12b-it      # swap to the Gemma-4-12B instruct id once confirmed on HF
+batch_sizes: [1, 2, 4, 8, 16, 32]
+permutations: 3
+strategy: random
+item_seed: 0
+tasks:
+  sst5:       {n_items: 512, few_shot: 0}
+  tweeteval:  {n_items: 512, few_shot: 0}
+  absa_atsc:  {n_items: 512, few_shot: 0}
+  absa_e2e:   {n_items: 512, few_shot: 4}      # JSON format needs a demo
+  strategyqa: {n_items: 512, few_shot: 0}
+  gsm8k:      {n_items: 512, few_shot: 0}      # CoT is in the answer format already
+  gec:        {n_items: 512, few_shot: 4}      # tokenised-text format needs a demo
+  # wikitq is held out for RQ3/RQ4 -- do not add it here

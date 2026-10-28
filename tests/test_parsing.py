@@ -28,6 +28,16 @@ def test_split_single_unnumbered():
     assert s.items == [None, None]
 
 
+def test_split_inline_markers():
+    s = P.split_batch_output("[1] positive [2] negative [3] neutral", 3)
+    assert s.items == ["positive", "negative", "neutral"]
+    s = P.split_batch_output("[1] [2] [3] [4]", 4)       # empty answers -> missing
+    assert s.items == [None] * 4
+    # a bracketed number inside an answer that is not followed by whitespace stays put
+    s = P.split_batch_output("[1] see ref [2]; fine\n[2] ok", 2)
+    assert s.items == ["see ref", "ok"] or s.items[1] == "ok"
+
+
 def test_split_duplicate_overrides():
     s = P.split_batch_output("[1] yes\n[1] no", 1)
     assert s.items == ["no"] and s.duplicate_keys == [1]

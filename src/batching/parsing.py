@@ -21,7 +21,18 @@ import re
 from dataclasses import dataclass, field
 
 _MARKER = re.compile(r"^\s*(?:\[(\d+)\]|(?:answer|output|item)?\s*(\d+)\s*[\.\):])\s*", re.I)
+_INLINE = re.compile(r"\s+(?=\[\d+\](?:\s|$))")   # several bracketed answers on one line
 _FENCE = re.compile(r"^```[a-z]*\s*$", re.I)
+
+
+def _lines(text: str) -> list[str]:
+    out = []
+    for line in text.splitlines():
+        if _MARKER.match(line) and line.lstrip().startswith("["):
+            out.extend(_INLINE.split(line))
+        else:
+            out.append(line)
+    return out
 
 
 @dataclass
@@ -43,7 +54,7 @@ def split_batch_output(text: str, n: int) -> BatchSplit:
     current: int | None = None
     prefix: list[str] = []
     duplicates: list[int] = []
-    for line in text.splitlines():
+    for line in _lines(text):
         if _FENCE.match(line):
             continue
         m = _MARKER.match(line)

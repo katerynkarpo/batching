@@ -1,0 +1,18 @@
+# Pipeline smoke test with no model: oracle outputs must score ~1.0 on every task.
+#   python scripts/run.py --config configs/smoke.yaml
+name: smoke_dummy
+backend: dummy
+backend_kwargs: {mode: oracle}
+models:
+  - id: oracle
+batch_sizes: [1, 4, 32]
+permutations: 2
+tasks:
+  sst5:       {n_items: 64}
+  tweeteval:  {n_items: 64}
+  absa_atsc:  {n_items: 64}
+  absa_e2e:   {n_items: 64, few_shot: 2}
+  strategyqa: {n_items: 64}
+  gsm8k:      {n_items: 64}
+  gec:        {n_items: 64, few_shot: 2}
+  wikitq:     {n_items: 32}

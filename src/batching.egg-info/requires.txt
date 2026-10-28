@@ -3,6 +3,18 @@ requests
 pandas
 errant
 scikit-learn
+pyyaml
+openai
 
 [dev]
 pytest
+
+[gpu]
+vllm>=0.8
+transformers>=4.51
+accelerate
+
+[local]
+torch
+transformers>=4.51
+accelerate

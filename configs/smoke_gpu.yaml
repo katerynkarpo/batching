@@ -1,0 +1,18 @@
+# First run on the GPU box: small subset, two batch sizes, checks model loading, chat template,
+# output format compliance and throughput before the full sweep.
+#   python scripts/run.py --config configs/smoke_gpu.yaml
+name: smoke_gpu
+backend: vllm
+backend_kwargs:
+  max_model_len: 16384
+  gpu_memory_utilization: 0.90
+models:
+  - id: Qwen/Qwen3-8B
+    chat_template_kwargs: {enable_thinking: false}
+batch_sizes: [1, 8]
+permutations: 1
+tasks:
+  sst5:      {n_items: 64}
+  absa_e2e:  {n_items: 64, few_shot: 4}
+  gsm8k:     {n_items: 32}
+  gec:       {n_items: 64, few_shot: 4}

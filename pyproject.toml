@@ -9,10 +9,14 @@ dependencies = [
     "pandas",
     "errant",
     "scikit-learn",
+    "pyyaml",
+    "openai",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+gpu = ["vllm>=0.8", "transformers>=4.51", "accelerate"]
+local = ["torch", "transformers>=4.51", "accelerate"]
 
 [build-system]
 requires = ["setuptools>=68"]

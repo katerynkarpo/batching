@@ -8,5 +8,15 @@ Requires-Dist: requests
 Requires-Dist: pandas
 Requires-Dist: errant
 Requires-Dist: scikit-learn
+Requires-Dist: pyyaml
+Requires-Dist: openai
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Provides-Extra: gpu
+Requires-Dist: vllm>=0.8; extra == "gpu"
+Requires-Dist: transformers>=4.51; extra == "gpu"
+Requires-Dist: accelerate; extra == "gpu"
+Provides-Extra: local
+Requires-Dist: torch; extra == "local"
+Requires-Dist: transformers>=4.51; extra == "local"
+Requires-Dist: accelerate; extra == "local"

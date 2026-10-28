@@ -5,3 +5,4 @@ __pycache__/
 results/cache/
 .DS_Store
 data/processed/
+results/smoke_*/
