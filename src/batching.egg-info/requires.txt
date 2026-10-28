@@ -1,0 +1,8 @@
+datasets
+requests
+pandas
+errant
+scikit-learn
+
+[dev]
+pytest
