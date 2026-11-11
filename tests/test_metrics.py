@@ -89,3 +89,13 @@ def test_gec_conll_two_annotators():
     stable = [r for r in rows if retokenize(r["meta"]["references"]["1"]) == r["meta"]["references"]["1"]]
     s, _ = M.evaluate("gec", stable, {r["id"]: r["meta"]["references"]["1"] for r in stable})
     assert s["f05"] == pytest.approx(1.0)
+
+
+def test_gec_retokenize_keeps_existing_tokens():
+    from batching.gec_eval import retokenize
+    # detokenised model output is tokenised the W&I way
+    assert retokenize("I'm sure he hasn't seen it.") == "I 'm sure he has n't seen it ."
+    # already tokenised clitics are not split again (plain spaCy gives "I ' m")
+    assert retokenize("I 'm sure he has n't seen it .") == "I 'm sure he has n't seen it ."
+    # a source token that spaCy would split is kept when the model copies it
+    assert retokenize("my 11-year - old son", keep=frozenset("my 11-year - old son".split())) == "my 11-year - old son"

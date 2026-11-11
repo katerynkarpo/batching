@@ -13,6 +13,10 @@
   Conflict labels kept in gold for E2E; dropped for ATSC (standard).
 - **WikiTQ**: official evaluator ported to Python 3 (`wtq_eval.py`), answers separated by ` | `.
 - **GEC**: ERRANT 3.0.2. Hypotheses are spaCy-retokenised, then annotated against the source.
+  Retokenisation is chunk-wise and leaves source tokens and clitics (`'m`, `n't`, ...) alone:
+  plain spaCy turns an already tokenised `I 'm` into `I ' m`, a spurious edit for any model
+  that copies the tokenised input (125 of 4384 BEA-dev gold sentences changed, gold F0.5 0.984;
+  after the fix 7 sentences, gold F0.5 0.997).
   References are **re-annotated with the same ERRANT** from (source, reference) pairs
   (`ref_mode="reannotate"`, default): gold-as-hypothesis then scores F0.5 = 1.0, whereas the
   original human spans give ~0.91 on BEA dev purely from alignment differences.

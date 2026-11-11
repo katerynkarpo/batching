@@ -25,10 +25,26 @@ def _annotator():
     return errant.load("en")
 
 
-def retokenize(text: str) -> str:
-    """Tokenise model output the way the W&I / CoNLL references are tokenised (spaCy)."""
-    ann = _annotator()
-    return " ".join(t.text for t in ann.nlp.tokenizer(text))
+# Clitics that are single tokens in the W&I / CoNLL tokenisation. spaCy splits them correctly
+# inside a word ("I'm" -> "I 'm") but breaks them when they already stand alone ("'m" -> "' m").
+_CLITICS = frozenset("'m 's 're 've 'd 'll n't 'S 'M 'RE 'VE 'D 'LL N'T n’t ’m ’s ’re ’ve ’d ’ll".split())
+
+
+def retokenize(text: str, keep: frozenset[str] = frozenset()) -> str:
+    """Tokenise model output the way the W&I / CoNLL references are tokenised (spaCy).
+
+    spaCy tokenises each whitespace-separated chunk on its own, so the output is processed chunk
+    by chunk and a chunk is left alone when it is already a token: a clitic, or any token of the
+    source sentence (`keep`). Without this a model that copies the tokenised input ("I 'm") is
+    charged a spurious edit ("I ' m")."""
+    tok = _annotator().nlp.tokenizer
+    out: list[str] = []
+    for chunk in text.split():
+        if chunk in keep or chunk in _CLITICS:
+            out.append(chunk)
+        else:
+            out.extend(t.text for t in tok(chunk))
+    return " ".join(out)
 
 
 def m2_blocks(m2_path: Path) -> list[str]:
@@ -43,20 +59,31 @@ def _edit_lines(orig_doc, cor: str, annotator_id: int) -> list[str]:
     return [f"A {e.o_start} {e.o_end}|||{e.type}|||{e.c_str}|||REQUIRED|||-NONE-|||{annotator_id}" for e in edits]
 
 
+# A sweep scores the same sentences once per (model, prompt, batch size): source parses and
+# reference annotations never change, and most hypotheses repeat across batch sizes.
+@lru_cache(maxsize=20_000)
+def _parse(text: str):
+    return _annotator().parse(text)
+
+
+@lru_cache(maxsize=500_000)
 def hyp_to_m2(orig: str, hyp: str) -> str:
-    ann = _annotator()
-    return "\n".join(["S " + orig] + _edit_lines(ann.parse(orig), hyp, 0))
+    return "\n".join(["S " + orig] + _edit_lines(_parse(orig), hyp, 0))
+
+
+@lru_cache(maxsize=20_000)
+def _ref_to_m2(orig: str, refs: tuple[tuple[int, str], ...]) -> str:
+    o = _parse(orig)
+    lines = ["S " + orig]
+    for k, ref in refs:
+        lines += _edit_lines(o, ref, k)
+    return "\n".join(lines)
 
 
 def ref_to_m2(orig: str, references: dict[str, str]) -> str:
     """Re-annotate (source, reference) pairs with ERRANT so reference edit spans use the same
     alignment as the hypotheses. Keeps one annotator id per reference."""
-    ann = _annotator()
-    o = ann.parse(orig)
-    lines = ["S " + orig]
-    for k, ref in sorted(references.items(), key=lambda kv: int(kv[0])):
-        lines += _edit_lines(o, ref, int(k))
-    return "\n".join(lines)
+    return _ref_to_m2(orig, tuple(sorted((int(k), ref) for k, ref in references.items())))
 
 
 def errant_compare(hyp_m2: Path, ref_m2: Path) -> dict:
@@ -95,7 +122,7 @@ def score_gec(records: list[dict], predictions: dict[str, str | None], workdir: 
             n_failed += 1
             hyp = r["input"]
         else:
-            hyp = retokenize(pred)
+            hyp = retokenize(pred, keep=frozenset(r["input"].split()))
         if hyp == r["input"]:
             n_unchanged += 1
         hyp_lines.append(hyp_to_m2(r["input"], hyp))
