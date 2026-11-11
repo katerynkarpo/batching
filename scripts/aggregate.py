@@ -4,9 +4,11 @@
     python scripts/aggregate.py --name rq1_v1 [--out results/rq1_v1/tables]
 
 Produces:
-  settings.csv   one row per (task, model, b, perm)
-  by_b.csv       mean over permutations per (task, model, b), delta vs b=1, paired-bootstrap 95% CI
-                 on the per-item primary signal (for tasks with per-item `correct`)
+  settings.csv   one row per (condition, model, b, perm)
+  by_b.csv       mean over permutations per (condition, model, b), delta vs b=1, paired-bootstrap
+                 95% CI on the per-item primary signal (for tasks with per-item `correct`)
+
+`condition` is the task name, or the label when one task runs under several prompts.
 """
 from __future__ import annotations
 
@@ -43,13 +45,14 @@ def main() -> int:
     out = Path(a.out) if a.out else base / "tables"
     out.mkdir(parents=True, exist_ok=True)
 
-    rows, items = [], defaultdict(dict)   # items[(task, model, b)][id] -> list of correct over perms
+    rows, items = [], defaultdict(dict)   # items[(condition, model, b)][id] -> list of correct over perms
     for sp in base.glob("*/*/b*_p*/summary.json"):
         s = json.loads(sp.read_text())
+        s.setdefault("condition", s["task"])
         rows.append({k: v for k, v in s.items() if not isinstance(v, (dict, list))})
         ip = sp.with_name("items.jsonl")
         if ip.exists():
-            key = (s["task"], s["model"], s["b"])
+            key = (s["condition"], s["model"], s["b"])
             for line in open(ip, encoding="utf-8"):
                 it = json.loads(line)
                 if "correct" in it:
@@ -57,16 +60,18 @@ def main() -> int:
     if not rows:
         print("no summaries found under", base)
         return 1
-    df = pd.DataFrame(rows).sort_values(["task", "model", "b", "perm"])
+    df = pd.DataFrame(rows).sort_values(["condition", "model", "b", "perm"])
     df.to_csv(out / "settings.csv", index=False)
 
     num = [c for c in df.columns if df[c].dtype.kind in "fi" and c not in ("b", "perm")]
-    agg = df.groupby(["task", "model", "b"])[num].mean().reset_index()
-    agg["n_perms"] = df.groupby(["task", "model", "b"]).size().values
-    base1 = agg[agg.b == 1].set_index(["task", "model"])["primary"]
-    agg["delta_vs_b1"] = [p - base1.get((t, m), float("nan")) for t, m, p in zip(agg.task, agg.model, agg.primary)]
+    agg = df.groupby(["condition", "model", "b"])[num].mean().reset_index()
+    agg["n_perms"] = df.groupby(["condition", "model", "b"]).size().values
+    first = df.groupby(["condition", "model", "b"])[["task", "primary_metric"]].first().reset_index()
+    agg["task"], agg["primary_metric"] = first["task"].values, first["primary_metric"].values
+    base1 = agg[agg.b == 1].set_index(["condition", "model"])["primary"]
+    agg["delta_vs_b1"] = [p - base1.get((t, m), float("nan")) for t, m, p in zip(agg.condition, agg.model, agg.primary)]
     lo, hi = [], []
-    for t, m, b in zip(agg.task, agg.model, agg.b):
+    for t, m, b in zip(agg.condition, agg.model, agg.b):
         a1, ab = items.get((t, m, 1)), items.get((t, m, b))
         if b == 1 or not a1 or not ab:
             lo.append(float("nan")); hi.append(float("nan")); continue
@@ -75,7 +80,7 @@ def main() -> int:
         l, h = paired_bootstrap(ma, mb)
         lo.append(l); hi.append(h)
     agg["delta_ci_lo"], agg["delta_ci_hi"] = lo, hi
-    cols = ["task", "model", "b", "n_perms", "primary_metric", "primary", "delta_vs_b1", "delta_ci_lo", "delta_ci_hi",
+    cols = ["condition", "model", "b", "n_perms", "primary_metric", "primary", "delta_vs_b1", "delta_ci_lo", "delta_ci_hi",
             "parse_failure_rate", "missing_rate", "truncated_batches", "prompt_tokens_per_item",
             "completion_tokens_per_item", "seconds_per_item"]
     agg = agg[[c for c in cols if c in agg.columns] + [c for c in agg.columns if c not in cols]]

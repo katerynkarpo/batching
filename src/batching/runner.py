@@ -43,21 +43,35 @@ class RunConfig:
     reasoning: bool = False
     results_dir: str = "results"
     gec_ref_mode: str = "reannotate"
+    prompt: str | None = None           # gec only: paper prompt variant (see gec_prompts.py)
+    label: str | None = None            # condition name when one task runs under several prompts
 
     @property
     def model_slug(self) -> str:
         return re.sub(r"[^A-Za-z0-9._-]+", "_", self.model)
 
     @property
+    def condition(self) -> str:
+        return self.label or self.task
+
+    @property
     def out_dir(self) -> Path:
-        return ROOT / self.results_dir / self.name / self.task / self.model_slug
+        return ROOT / self.results_dir / self.name / self.condition / self.model_slug
 
 
 # ----------------------------------------------------------------------------- cache
 class GenCache:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, timeout=300)    # several sweep processes share the cache
+        for attempt in range(60):   # switching to WAL ignores the busy timeout: retry while others start
+            try:
+                self.db.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError:
+                if attempt == 59:
+                    raise
+                time.sleep(0.5)
         self.db.execute("CREATE TABLE IF NOT EXISTS gen (key TEXT PRIMARY KEY, value TEXT)")
 
     @staticmethod
@@ -98,7 +112,7 @@ def load_eval_records(cfg: RunConfig) -> list[dict]:
 
 
 def load_demos(cfg: RunConfig) -> list[dict]:
-    if cfg.few_shot == 0:
+    if cfg.few_shot == 0 or cfg.prompt is not None:   # paper prompts: demos are in the system prompt
         return []
     name = TRAIN_FILES[cfg.task]
     if "{domain}" in name:
@@ -119,8 +133,12 @@ def run_one_setting(cfg: RunConfig, backend: Backend, cache: GenCache, records: 
     out_dir.mkdir(parents=True, exist_ok=True)
 
     batches = make_batches(records, b, seed=1000 * perm + b, strategy=cfg.strategy)
-    max_new = prompts.max_new_tokens(cfg.task, b, cfg.reasoning)
-    convs = [prompts.build_messages(cfg.task, batch, demos, cfg.reasoning) for batch in batches]
+    if cfg.prompt is not None:
+        max_new = max(prompts.gec_max_new_tokens(batch) for batch in batches)
+    else:
+        max_new = prompts.max_new_tokens(cfg.task, b, cfg.reasoning)
+    convs = [prompts.build_messages(cfg.task, batch, demos, cfg.reasoning, prompt=cfg.prompt,
+                                    few_shot=cfg.few_shot) for batch in batches]
     keys = [GenCache.key(backend, cfg.model, c, max_new) for c in convs]
     gens: list[Generation | None] = [cache.get(k) for k in keys]
     todo = [i for i, g in enumerate(gens) if g is None]
@@ -162,7 +180,8 @@ def run_one_setting(cfg: RunConfig, backend: Backend, cache: GenCache, records: 
     ptoks = [g.prompt_tokens for g in gens if g.prompt_tokens is not None]
     ctoks = [g.completion_tokens for g in gens if g.completion_tokens is not None]
     summary.update({
-        "task": cfg.task, "model": cfg.model, "b": b, "perm": perm, "n_batches": len(batches),
+        "task": cfg.task, "condition": cfg.condition, "prompt": cfg.prompt, "few_shot": cfg.few_shot,
+        "model": cfg.model, "b": b, "perm": perm, "n_batches": len(batches), "max_new_tokens": max_new,
         "primary_metric": metrics.PRIMARY_METRIC[cfg.task],
         "primary": summary[metrics.PRIMARY_METRIC[cfg.task]],
         "missing_rate": n_missing / n, "extra_keys": n_extra, "duplicate_keys": n_dup,
@@ -189,7 +208,7 @@ def run(cfg: RunConfig, backend: Backend, cache: GenCache | None = None) -> list
         for perm in range(1 if b == 1 else cfg.permutations):
             s = run_one_setting(cfg, backend, cache, records, demos, b, perm)
             summaries.append(s)
-            print(f"[{cfg.task} | {cfg.model} | b={b} p={perm}] {s['primary_metric']}={s['primary']:.4f} "
+            print(f"[{cfg.condition} | {cfg.model} | b={b} p={perm}] {s['primary_metric']}={s['primary']:.4f} "
                   f"missing={s['missing_rate']:.3f} parse_fail={s['parse_failure_rate']:.3f} "
                   f"trunc={s['truncated_batches']} cached={s['cached_batches']}/{s['n_batches']}", flush=True)
     return summaries

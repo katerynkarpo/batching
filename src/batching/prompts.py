@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from . import gec_prompts
+
 
 @dataclass(frozen=True)
 class TaskSpec:
@@ -139,13 +141,23 @@ def answers_block(task: str, recs: list[dict], reasoning: bool) -> str:
 
 
 def build_messages(task: str, batch: list[dict], demos: list[dict] | None = None,
-                   reasoning: bool = False) -> list[dict]:
-    """Chat messages for one batch. `batch` and `demos` are unified records."""
+                   reasoning: bool = False, prompt: str | None = None, few_shot: int = 0) -> list[dict]:
+    """Chat messages for one batch. `batch` and `demos` are unified records.
+
+    `prompt` (GEC only) replaces the default instruction with a paper prompt from `gec_prompts`;
+    its `few_shot` demonstrations live in the system prompt, so `demos` must be empty.
+    """
     spec = SPECS[task]
-    instr = spec.instruction
-    if reasoning and spec.reasoning_instruction:
-        instr += " " + spec.reasoning_instruction
-    system = instr
+    if prompt is not None:
+        if task != "gec":
+            raise ValueError("prompt variants exist only for the gec task")
+        if demos:
+            raise ValueError("paper GEC prompts carry their few-shot examples in the system prompt")
+        system = gec_prompts.system_prompt(prompt, few_shot)
+    else:
+        system = spec.instruction
+        if reasoning and spec.reasoning_instruction:
+            system += " " + spec.reasoning_instruction
 
     def user_turn(recs: list[dict]) -> str:
         rule = FORMAT_RULE.format(n=len(recs), fmt=spec.answer_format)
@@ -164,3 +176,10 @@ def max_new_tokens(task: str, batch_size: int, reasoning: bool = False) -> int:
     if reasoning and task == "strategyqa":
         per_item = 160
     return per_item * batch_size + 32
+
+
+def gec_max_new_tokens(batch: list[dict]) -> int:
+    """Generation budget for one GEC batch, from the input length: 2 tokens per whitespace word
+    plus the '[n] ' marker. The flat per-item budget (120 * b) would exceed the context window
+    at b >= 150; this stays near 1.7x the expected output and still exposes runaway generations."""
+    return sum(2 * len(r["input"].split()) + 8 for r in batch) + 64

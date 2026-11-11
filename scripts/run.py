@@ -6,6 +6,9 @@
 
 Config schema (see configs/*.yaml): name, backend, backend_kwargs, models: [{id, ...backend overrides}],
 tasks: {task: {n_items, few_shot, reasoning, data_file, ...}}, batch_sizes, permutations, strategy.
+
+A task key may also be a condition label with an explicit task, to run one task under several
+prompts:  gec_taxonomy_fs: {task: gec, prompt: taxonomy, few_shot: 8}.  --tasks filters by label.
 """
 from __future__ import annotations
 
@@ -45,13 +48,14 @@ def main() -> int:
         bk = dict(cfg.get("backend_kwargs", {}))
         bk.update({k: v for k, v in m.items() if k != "id"})
         print(f"== loading {backend_name}: {model_id}", flush=True)
-        for task, tcfg in tasks.items():
+        for label, tcfg in tasks.items():
+            task = tcfg.get("task", label)
             backend_kwargs = dict(bk)
             if backend_name == "dummy":
                 backend_kwargs = {"mode": bk.get("mode", "oracle"), "task": task}
             elif backend_name in ("hf", "vllm", "openai"):
                 backend_kwargs["model"] = model_id
-            if task == list(tasks)[0] or backend_name == "dummy":
+            if label == list(tasks)[0] or backend_name == "dummy":
                 backend = make_backend(backend_name, **backend_kwargs)
             rc = RunConfig(
                 name=name, task=task, model=model_id, backend=backend_name, backend_kwargs=backend_kwargs,
@@ -64,6 +68,8 @@ def main() -> int:
                 few_shot=tcfg.get("few_shot", cfg.get("few_shot", 0)),
                 demo_seed=tcfg.get("demo_seed", 0),
                 reasoning=tcfg.get("reasoning", False),
+                prompt=tcfg.get("prompt"),
+                label=label if label != task else None,
                 results_dir=cfg.get("results_dir", "results"),
             )
             run(rc, backend, cache)

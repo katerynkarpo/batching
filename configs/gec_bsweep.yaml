@@ -1,0 +1,56 @@
+# GEC batch-size sweep: paper prompts (llm-en-gec) x open-weight models x b = 1..200.
+# Run on one A100 80GB:  python scripts/run.py --config configs/gec_bsweep.yaml
+#   one model:      --models Qwen/Qwen3-8B
+#   one condition:  --tasks gec_taxonomy_zs
+#
+# Prompts are byte-identical to the paper (src/batching/gec_prompts.py). Few-shot = the paper's
+# 8 BEA-train examples (seed 123) inside the system prompt, so they do not vary with b.
+# Batch framing ([n] numbering + format rule in the user turn) is this repo's, the same at b=1.
+# There is no retry of malformed batches: missing / truncated answers are part of the result.
+name: gec_bsweep_v1
+backend: vllm
+backend_kwargs:
+  max_model_len: 32768          # sized for b=300 (~10k prompt + ~15k generation budget); b=200 needs ~17k
+  gpu_memory_utilization: 0.90
+# 120, 170, 250, 300 are left out for now to save GPU time (large b is the slow part). Adding them
+# later only runs the new settings: finished ones are skipped.
+batch_sizes: [1, 2, 5, 10, 15, 20, 30, 50, 70, 100, 150, 200]
+permutations: 1                 # full dev set: every sentence is seen once per batch size
+strategy: random
+
+models:
+  # --- full attention in every layer
+  - id: Qwen/Qwen3-8B                                  # paper anchor
+    chat_template_kwargs: {enable_thinking: false}
+  - id: mistralai/Ministral-3-8B-Instruct-2512
+  - id: mistralai/Ministral-3-14B-Instruct-2512
+  - id: mistralai/Mistral-Small-3.2-24B-Instruct-2506  # no HF chat template in the repo
+    tokenizer_mode: mistral
+    config_format: mistral
+    load_format: mistral
+  # --- linear + full attention (3:1)
+  - id: Qwen/Qwen3.5-4B
+    chat_template_kwargs: {enable_thinking: false}
+  - id: Qwen/Qwen3.5-9B
+    chat_template_kwargs: {enable_thinking: false}
+  - id: Qwen/Qwen3.6-27B
+    chat_template_kwargs: {enable_thinking: false}
+  - id: Qwen/Qwen3.6-35B-A3B                           # MoE; 67 GiB of weights
+    chat_template_kwargs: {enable_thinking: false}
+    gpu_memory_utilization: 0.95
+  # --- sliding window + global attention (5:1)
+  - id: google/gemma-4-E4B-it
+    chat_template_kwargs: {enable_thinking: false}
+  - id: google/gemma-4-12B-it
+    chat_template_kwargs: {enable_thinking: false}
+  - id: google/gemma-4-31B-it
+    chat_template_kwargs: {enable_thinking: false}
+    gpu_memory_utilization: 0.95
+
+tasks:                          # n_items omitted = full BEA-2019 dev (4384 sentences)
+  gec_base_zs:     {task: gec, prompt: base,          few_shot: 0}
+  gec_base_fs:     {task: gec, prompt: base,          few_shot: 8}
+  gec_minimal_zs:  {task: gec, prompt: minimal_edits, few_shot: 0}
+  gec_minimal_fs:  {task: gec, prompt: minimal_edits, few_shot: 8}
+  gec_taxonomy_zs: {task: gec, prompt: taxonomy,      few_shot: 0}
+  gec_taxonomy_fs: {task: gec, prompt: taxonomy,      few_shot: 8}

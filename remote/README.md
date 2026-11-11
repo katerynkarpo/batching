@@ -28,6 +28,25 @@ never needs the raw downloads except the GEC M2 files (ERRANT scoring reads them
 Every (task, model, b, perm) setting writes `summary.json` and is skipped on rerun; generations
 are cached in `results/cache/generations.sqlite`, so an interrupted sweep resumes for free.
 
+## 3b. GEC batch-size sweep (paper prompts, b = 1..200)
+
+`configs/gec_bsweep.yaml`: 11 models x 6 prompt conditions (base / minimal_edits / taxonomy, each
+zero-shot and 8-shot) x 12 batch sizes on the full BEA dev set. One process per model, because
+vLLM keeps the GPU memory until the process exits:
+
+    export GPUS="0 1 2 3"                      # one queue of models per GPU (default: GPU 0 only)
+    bash remote/run_gec_bsweep.sh --smoke      # every model: 600 sentences, b in {1, 20, 200}
+    tmux new -s gec
+    bash remote/run_gec_bsweep.sh              # full sweep; re-run to resume
+
+With several GPUs the script balances the queues by model size and runs them in parallel.
+
+Check in the smoke log, per model: it loads, `trunc=0`, `missing` is not ~1.0 at b=1 (chat template
+or thinking problem), and b=200 does not run out of memory. The weights of all models are ~370 GB;
+on a smaller disk run with `PURGE_WEIGHTS=1`. `MODELS="..."` restricts the list.
+
+    .venv/bin/python scripts/aggregate.py --name gec_bsweep_v1
+
 ## 4. Pull results
 
     rsync -avz $GPU:~/batching/results/ ./results/

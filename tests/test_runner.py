@@ -52,3 +52,35 @@ def test_garbage_outputs_are_counted(tmp_path):
                     permutations=1, results_dir=str(tmp_path))
     s = run(cfg, DummyBackend("garbage", "sst5"), GenCache(tmp_path / "c.sqlite"))[0]
     assert s["missing_rate"] == 1.0 and s["parse_failure_rate"] == 1.0 and s["accuracy"] == 0.0
+
+
+def test_gec_paper_prompt_messages():
+    from batching import gec_prompts
+
+    recs = [{"id": "a", "input": "He go home .", "meta": {}}, {"id": "b", "input": "I has a cat .", "meta": {}}]
+    zs = prompts.build_messages("gec", recs, prompt="minimal_edits")
+    fs = prompts.build_messages("gec", recs, prompt="minimal_edits", few_shot=8)
+    assert [m["role"] for m in zs] == [m["role"] for m in fs] == ["system", "user"]
+    assert zs[0]["content"] == gec_prompts.GEC_PROMPTS["minimal_edits"]
+    assert fs[0]["content"].startswith(zs[0]["content"]) and fs[0]["content"].count("\nCorrection: ") == 8
+    assert zs[1] == fs[1] and "[1] He go home .\n[2] I has a cat ." in zs[1]["content"]
+    # the taxonomy prompt extends the minimal-edits prompt, as in the paper
+    assert gec_prompts.GEC_PROMPTS["taxonomy"].startswith(gec_prompts.GEC_PROMPTS["minimal_edits"].split("RULES:")[0])
+    with pytest.raises(ValueError):
+        prompts.build_messages("gec", recs, prompt="nope")
+    with pytest.raises(ValueError):
+        prompts.build_messages("sst5", recs, prompt="base")
+    assert prompts.gec_max_new_tokens(recs) == 2 * 4 + 8 + 2 * 5 + 8 + 64
+
+
+@pytest.mark.skipif(not (PROCESSED / "gec" / "bea19_dev.jsonl").exists(), reason="data not downloaded")
+def test_gec_conditions_oracle_end_to_end(tmp_path):
+    cache = GenCache(tmp_path / "cache.sqlite")
+    for label, few_shot in [("gec_taxonomy_zs", 0), ("gec_taxonomy_fs", 8)]:
+        cfg = RunConfig(name="t", task="gec", model="oracle", backend="dummy", n_items=24, batch_sizes=[1, 10],
+                        permutations=1, few_shot=few_shot, prompt="taxonomy", label=label,
+                        results_dir=str(tmp_path))
+        sums = run(cfg, DummyBackend("oracle", "gec"), cache)
+        assert cfg.out_dir.parent.name == label
+        assert [s["condition"] for s in sums] == [label, label]
+        assert all(s["primary"] == pytest.approx(1.0) and s["missing_rate"] == 0 for s in sums)
